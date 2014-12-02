@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<style>
+
+body {
+  font-family: Arial;
+}
+
+.bar text {
+  fill: #000;
+  font-size: 12px;
+}
+
+.bar line {
+  stroke: #000;
+  stroke-width: 0.3;
+}
+
+.counties {
+  fill: none;
+}
+
+.states {
+  fill: none;
+  stroke: #fff;
+  stroke-linejoin: round;
+}
+
+.q0-9 { fill:rgb(247,251,255); }
+.q1-9 { fill:rgb(222,235,247); }
+.q2-9 { fill:rgb(198,219,239); }
+.q3-9 { fill:rgb(158,202,225); }
+.q4-9 { fill:rgb(107,174,214); }
+.q5-9 { fill:rgb(66,146,198); }
+.q6-9 { fill:rgb(33,113,181); }
+.q7-9 { fill:rgb(8,81,156); }
+.q8-9 { fill:rgb(8,48,107); }
+
+.tract {
+  stroke: #333;
+  stroke-width: 0.15px;
+  fill: #eee;
+}
+
+.tract:hover {
+  stroke: #000;
+}
+
+.title {
+  font-family: Arial;
+  font-size: 30px;
+}
+
+.description {
+  font-family: Arial;
+  font-size: 16px;
+}
+
+.tick text, .notes {
+  font-size: 10px;
+  color: #999;
+}
+
+.axis path, .axis line {
+  fill: none;
+  stroke: #000;
+  stroke-width: 0.25;
+}
+
+</style>
+<body>
+<script src="http://d3js.org/queue.v1.min.js"></script>
+<script src="http://d3js.org/d3.v3.min.js"></script>
+<script src="http://d3js.org/topojson.v1.min.js"></script>
+<script src="simple_statistics.js"></script>
+<script>
+/*
+  PART 1: CHANGE YOUR CENSUS CSV FILENAME (if you need to)
+*/
+
+var census_filename = "ACS_12_5YR_S1810.csv";
+
+/*
+  PART 2: PUT YOUR FIELD INTO VALUE_FUNCTION
+          note: change it on !!!both lines!!!
+*/
+
+var exclude_zeroes = true;
+
+function value_function(d) {
+   // Check to see if it's empty (e.g. Central Park)
+  if(d['HC03_EST_VC01'] == '') { return; }
+    
+  // Keep the '+' in front of it to turn it into a number, please!
+  // be sure to change it up above, too
+  var value = +d['HC03_EST_VC01'];
+  
+  if(adjust_for_population) {
+    var population = population_data[population_year].get(d['GEO.display-label']);
+    return (value / population) * per_population;
+  } else {
+    return value;
+  }
+}
+
+/*
+  PART 2.5: CLEANING DATA / ADJUST FOR POPULATION?
+
+  exclude_zeroes:
+    Sometimes Central Park has no data, sometimes it lists '0'
+    for the data. Turning on 'exclude zeroes' ignores data points
+    that are '0' and excludes them from the calculations. Sometimes
+    this is okay, sometimes it isn't!
+
+  adjust_for_population:
+    divides the value of your field by the population of the tract
+
+  per_population:
+    Instead of saying 0.01 per person, maybe it's nicer to say
+    1 per 100, or 10 per 1,000. Your population-adjusted amount
+    is multiplied by this number.
+
+  population_year:
+    supports pulling population data from 2011 or 2012
+*/
+
+var exclude_zeroes = true;
+var adjust_for_population = false;
+var per_population = 0;
+var population_year = 2012;
+
+/*
+   PART 3: CHOOSE YOUR SCALE TYPE
+           options: gradient, diverging, threshold
+*/ 
+
+var scale_type = "threshold";
+
+/*
+   PART 4: CUSTOMIZE YOUR SCALE
+*/
+
+/*
+
+  THRESHOLD OPTIONS
+  
+  NOTE: Make sure you have one more threshold_colors than threshold_inputs!
+
+  threshold_inputs:
+    The numbers to use as boundaries for your categories/buckets.
+    If you're copying from jenks, leave out the first and last numbers.
+
+  threshold_colors:
+    are the colors of each threshold. The first color is for everything
+    below the first element of threshold_inputs, the second color is for
+    between item 1 and 2, ... , the last color is for everything that's
+    above the last threshold_input
+
+  jenks_categories:
+    is just for the reference list above the histogram, 
+    you'll have to manually type the values into threshold_inputs
+
+  interval_categories:
+    is for 'equal intervals' breaks
+*/
+
+var threshold_inputs = [8.10, 12.70, 18.80, 32.90];
+var threshold_colors = ["white", "yellow", "orange", "red"];
+var jenks_categories = 4;
+var interval_categories = 4;
+
+/*
+ 
+ GRADIENT/DIVERGING OPTIONS
+ 
+ growth_type:
+   sqrt or linear
+
+ min_color/neutral_color/max_color:
+   color name or HTML code
+
+ mid_value:
+   'median' or 0 are most common, or a custom number
+
+ spread_type:
+   'centered' or 'minmax'
+   Should the gradient be centered on the middle value?
+   if "centered" with values of -5...0...100
+   the actual gradient would go from -100..0..100
+   for minmax, it would just be -5...0...100
+*/
+
+var min_value, mid_value, max_value;
+
+// 'min', 'max', 'median', 0 or any other number
+var scale_options = {
+  growth_type: 'linear',
+  gradient: {
+    min_color: 'white',
+    max_color: 'red',
+    min_value: 0,
+    max_value: '50'
+  },
+  diverging: {
+    min_color: 'green',
+    mid_color: 'white',
+    max_color: 'red',
+    
+    // you can use specific numbers, but 'auto' is
+    // probably best for min_value and max_value.
+    // mid should typically be 'median' or 0
+    min_value: 'auto',
+    mid_value: 'median',
+    max_value: 'auto',    
+    
+    // see notes above
+    spread_type: 'centered'
+  }
+}
+
+/*
+
+   PART 5: Various other stuff
+
+*/
+
+var title_text = "Disability distribution in NYC";
+var description_text =  [ "where the majority of disabled people live in NYC"];
+var show_notes = true;
+var show_histogram = true;
+
+/*
+
+
+END OF THE STUFF YOU WOULD REASONABLY BE EDITING 
+
+
+
+*/
+
+// We aren't using this function! Maybe in the future.
+var class_function = function(d) {
+  return 'tract';
+}
+
+var target_field = "GEO.id2";
+var width = 700,
+    height = 700;
+
+var dataById = d3.map();
+var population_data = {
+  2011: d3.map(),
+  2012: d3.map()
+}
+
+var projection = d3.geo.mercator()
+    .center([-73.87, 40.77])
+    .scale(70000)
+
+var path = d3.geo.path()
+    .projection(projection);
+
+var svg = d3.select("body").append("svg")
+    .attr("width", width)
+    .attr("height", height);
+
+queue()
+    .defer(d3.json, "nyc.json")
+    .defer(d3.csv, census_filename)
+    .defer(d3.csv, "population-ACS_11_5YR_B01003.csv", function(d) {
+      var year = 2011;
+      var wanted_counties = [ "Kings County", "Queens County", "New York County", "Richmond County", "Bronx County"];
+      var population = d['HD01_VD01'];
+      var county = d['GEO.display-label'].replace(/.*?\, (.*), New York/gi,'$1');
+      // make sure there's a value AND it's one of the counties we want
+      if(population !== '' && !isNaN(population) && wanted_counties.indexOf(county) != -1) {
+        population_data[year].set(d['GEO.display-label'], +population);
+      }
+    })
+    .defer(d3.csv, "population-ACS_12_5YR_B01003.csv", function(d) {
+      var year = 2012;
+      var wanted_counties = [ "Kings County", "Queens County", "New York County", "Richmond County", "Bronx County"];
+      var population = d['HD01_VD01'];
+      var county = d['GEO.display-label'].replace(/.*?\, (.*), New York/gi,'$1');
+      // make sure there's a value AND it's one of the counties we want
+      if(population !== '' && !isNaN(population) && wanted_counties.indexOf(county) != -1) {
+        population_data[year].set(d['GEO.display-label'], +population);
+      }
+    })
+    .await(ready);
+
+var scale;
+
+function setupScales() {  
+  var values = dataById.values();
+  var values_min = ss.min(values);
+  var values_max = ss.max(values);
+
+  var min_val, max_val, mid_val;
+
+  var options = scale_options[scale_type];
+  
+  var scale_base = d3.scale[scale_options['growth_type']]();
+  
+  // This code is all garbage.
+  
+  if(scale_type == 'gradient') {
+    min_val = isNaN(options['min_value']) ? ss[options['min_value']](values) : parseFloat(options['min_value']);
+    max_val = isNaN(options['max_value']) ? ss[options['max_value']](values) : parseFloat(options['max_value']);
+    scale = scale_base.domain([min_val, max_val]).range([options['min_color'], options['max_color']]);
+  } else if (scale_type == 'diverging') {
+    mid_val = isNaN(options['mid_value']) ? ss[options['mid_value']](values) : parseFloat(options['mid_value']);
+    if(options['min_value'] == 'auto' || options['max_value'] == 'auto') {
+      if(options['spread_type'] == 'centered') {
+        var max_diff = values_max - mid_val;
+        var min_diff = mid_val - values_min;
+        var diff = ss.max([max_diff, min_diff]);
+        var min_val = mid_val - diff;
+        var max_val = mid_val + diff;
+      } else if (options['spread_type'] == 'minmax') {
+        min_val = values_min;
+        max_val = values_max;
+      } else {
+        alert("I don't know this spread type!");
+      }
+    } else {
+      min_val = isNaN(options['min_value']) ? ss[options['min_value']](values) : parseFloat(options['min_value']);
+      max_val = isNaN(options['max_value']) ? ss[options['max_value']](values) : parseFloat(options['max_value']);
+    }
+    scale = scale_base.domain([min_val, mid_val, max_val]).range([options['min_color'], options['mid_color'], options['max_color']]);
+  } else if (scale_type == 'threshold') {
+    scale = d3.scale.threshold().domain(threshold_inputs).range(threshold_colors)
+  } else {
+    scale = scale_base;
+  }
+}
+
+function niceNumber(d) {
+  return d.toFixed(2).replace('.00','');
+}
+
+function joined(numbers) {
+  return numbers.map( function(d) { return niceNumber(d) } ).join(", ")
+}
+  
+function drawNotes(x, y) {
+  var values = dataById.values();
+  var values_min = d3.min(values);
+  var values_max = d3.max(values);
+  var std_dev = ss.standard_deviation(values);
+  var median = ss.median(values);
+  var mean = ss.mean(values);
+  var jenks = ss.jenks(values, jenks_categories);
+  var std_breaks = [median - parseInt(std_dev), median, median + parseInt(std_dev)];
+  
+  var interval = (values_max - values_min) / interval_categories;
+  var interval_breaks = [values_min + interval * 1, values_min + interval * 2, values_min + interval * 3];
+
+  var lower = values.filter( function(d) {
+    return d < median;
+  });
+  var upper = values.filter( function(d) {
+    return !(d < median);
+  })
+  
+  var quantiles = [ss.median(lower), median, ss.median(upper)];
+
+  // remove the first and last from jenks
+  jenks.shift();
+  jenks.pop();
+
+  var notes_box = svg.append("g").attr("transform", "translate(" + x + "," + y + ")").attr('class','notes');
+  
+  [
+    ["DATA NOTES:"],
+    ["adjusted for population", (adjust_for_population ? "yes" : "no")],
+    ["min", niceNumber(values_min)],
+    ["max", niceNumber(values_max)],
+    ["median", niceNumber(median)],
+    ["mean", niceNumber(mean)],
+    ["std dev", niceNumber(std_dev)],
+    [""],
+    ["POSSIBLE THRESHOLDS:"],
+    ["current" + (scale_type != "threshold" ? " (not used)" : ""), joined(threshold_inputs)],
+    ["jenks (" + jenks_categories + "): ", joined(jenks)],
+    ["std dev: ", joined(std_breaks) ],
+    ["equal interval (" + interval_categories + "): ", joined(interval_breaks)],
+    ["quantiles", joined(quantiles)]
+  ].forEach( function(e, i) {
+    notes_box.append("text")
+        .text(e.join(": "))
+        .attr('y',i * 12)
+  })
+}
+
+function drawHistogram(hist_width, hist_height, x, y) {
+  var values = dataById.values();
+  var values_min = d3.min(values);
+  var values_max = d3.max(values);
+  
+  var hist_box = svg.append("g").attr("transform", "translate(" + x + "," + y + ")");
+
+  var x = d3.scale.linear()
+      .domain([values_min, values_max])
+      .range([0, hist_width]);
+
+  // var data = d3.layout.histogram().bins(x.ticks(100))(values);
+  var data = d3.layout.histogram().bins(100)(values);
+  
+  var y = d3.scale.linear()
+      .domain([0, d3.max(data, function(d) { return d.y; })])
+      .range([hist_height, 0]);
+
+  var xAxis = d3.svg.axis()
+      .ticks(7)
+      .scale(x)
+      .orient("bottom");
+  
+  var bar = hist_box.selectAll(".bar")
+      .data(data)
+    .enter().append("g")
+      .attr("class", "bar")
+      .attr("transform", function(d) { return "translate(" + x(d.x) + "," + y(d.y) + ")"; });
+
+  var bar_width = 3;
+  
+  bar.append("rect")
+      .attr("x", 1)
+      .attr("width", bar_width)
+      // .attr("width", x(data[0].dx) - 1)
+      .attr("height", function(d) { 
+        return hist_height - y(d.y); 
+      })
+      .style("fill", function(d) {
+        return scale(d3.median(d));
+      });
+
+  // Draw a line on top of everything that's really light
+  bar.append("line")
+      .filter( function(d) {
+        var color = scale(d3.median(d));
+        var lightness = d3.hsl(color)['l'];
+        return lightness > 0.9;
+      })
+      .attr("x1", 1)
+      .attr("x2", bar_width + 1)
+      .attr("y1", 0)
+      .attr("y2", 0)
+
+  var formatCount = d3.format(",.0f");
+
+  hist_box.append("g")
+      .attr("class", "x axis")
+      .attr("transform", "translate(0," + hist_height + ")")
+      .call(xAxis);
+}
+
+function ready(error, nyc, census_data) {
+  
+  // Let's set up the census data
+  census_data.forEach(function(d) {
+    var wanted_counties = [ "Kings County", "Queens County", "New York County", "Richmond County", "Bronx County"];
+    var value = value_function(d);
+    var county = d['GEO.display-label'].replace(/.*?\, (.*), New York/gi,'$1');
+    // make sure there's a value AND it's one of the counties we want
+    if(typeof value !== 'undefined' && wanted_counties.indexOf(county) != -1 && !isNaN(value) && value != 100 && !(exclude_zeroes && value == 0)) {
+      dataById.set(d['GEO.display-label'], value);
+    }
+  });
+  
+  setupScales();
+  var tracts = topojson.feature(nyc, nyc.objects.tracts)
+
+  svg.append("g")
+    .selectAll("path")
+      .data(tracts.features)
+    .enter().append("path")
+      .attr("d", path)
+      .attr("class", class_function)
+      .style("fill", function(d) {
+        var value = dataById.get(d.id);
+        return scale(value);
+      })
+      .append("title")
+        .text(function(d, i) { 
+          var value = dataById.get(d.id);
+          return d.id + ", value is: " + value; 
+        });
+
+  svg.append("path")
+      .attr("class", "tract-border")
+      .datum(topojson.mesh(nyc, tracts, function(a, b) { return a !== b; }))
+      .attr("d", path);
+
+  svg.append("text")
+      .text(title_text)
+      .attr('class', 'title')
+      .attr('x',0)
+      .attr('y',40);
+
+  svg.selectAll(".description")
+      .data(description_text)
+      .enter().append("text")
+      .text(description_text)
+      .attr('class', 'description')
+      .attr('x', 20)
+      .attr('y',function(d, i) {
+        // offset of 80, then add 12 per line
+        return 70 + i * 16;
+      })
+
+  if(show_histogram)
+    drawHistogram(300, 50, 0, 140);
+  if(show_notes)
+    drawNotes(20, 230);
+}
+</script>
