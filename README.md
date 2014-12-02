@@ -1,0 +1,1 @@
+These files use data from: http://factfinder2.census.gov/faces/nav/jsf/pages/searchresults.xhtml?refresh=t. I have included the relevant csv files to my d3 maps. These projects were made with the help of Jonathan Soma during my time in the Lede Program at Columbia University. 
